@@ -12,6 +12,15 @@
         const STORIES_PAGE  = "storiesPage";
         const CATEGORY_PAGE = "categoryPage";
 
+        const TRUTH_ICON          = "green.gif";
+        const FALSE_ICON          = "red.gif";
+        const MULTI_TRUTH_ICON    = "multi.gif";
+        const MIXED_ICON          = "mixture.gif";
+        const PARTLY_TRUE_ICON    = "mostlytrue.gif";
+        const UNDETERMINED_ICON   = "yellow.gif";
+        const UNCLASSIFIABLE_ICON = "white.gif";
+        const LEGEND_ICON         = "legend.gif";
+
         /**
          * Get an array of all the categories on Snopes
          *
@@ -59,7 +68,7 @@
             }
 
             $crawler = new Crawler($categoryHTML);
-            echo "Fetching $baseURL\n";
+            echo "http://www.snopes.com$baseURL\n";
 
             $baseXPath = "/_root/html/body/div[1]/table[3]/tr/td/table/tr/td[2]/table//a";
 
@@ -77,6 +86,7 @@
                 );
             }
 
+            // try a different xpath for older pages
             if (count($subcategories) <= 0) {
                 $baseXPath = '//*[@id="main-content"]/table/tr/td[2]/center/font[2]/div/table//a';
 
@@ -96,9 +106,6 @@
                 }
             }
 
-//            self::getStories($baseURL);
-
-//            print_r($subcategories);
             return $subcategories;
         }
 
@@ -106,55 +113,77 @@
          * Get a list of stories related to a category
          *
          * @param        $baseURL
-         * @param string $version
          */
-        private static function getStories($baseURL, $version = self::NEW_STORIES)
+        public static function getStorySummaries($baseURL)
         {
             $categoryHTML = file_get_contents("http://www.snopes.com" . $baseURL);
-//            $crawler      = new Crawler($categoryHTML);
-
-//            $baseXPath = "/_root/html/body/div[1]/table[3]/tr/td/table/tr/td[2]/div[2]/table/tr/td";
-//            $stories   = $crawler->filterXPath("$baseXPath");
 
             libxml_use_internal_errors(true);
             $dom = new DOMDocument();
             $dom->loadHTML($categoryHTML);
 
-//            $sequence = array();
-//            switch($version)
-//            {
-//                case self::OLD_STORIES:
-//                    break;
-//                case self::NEW_STORIES:
-//                    $sequence = array("a", "font", "b", "a");
-//                    break;
-//            }
-
             $q = new DOMXPath($dom);
+
+            // try to get list for pages like:
+            // http://www.snopes.com/cokelore/cokelore.asp
             $s = $q->query("/html/body/div[1]/table[3]/tr/td/table/tr/td[2]/div[2]/table/tr/td");
+
+            // otherwise, try to get list for pages like:
+            // http://www.snopes.com/military/military.asp
+            if ($s->length == 0) {
+                $s = $q->query('//*[@id="main-content"]/table/tr/td[2]/center/font[2]/div/table[2]/tr/td');
+            }
 
             foreach ($s as $story) {
                 $story = $dom->saveHTML($story);
                 $story = str_replace("<br><br>", "\n\n-----------------\n\n", $story);
                 $story = str_replace("\r\n", "", $story);
 
-//                if(strpos($story, "href") !== false)
-//                    echo "\n\n";
+                // try to parse list for pages like:
+                // http://www.snopes.com/cokelore/cokelore.asp
+                $result = self::parseNewSummaryPage($story);
 
-                preg_match_all(
-                    '%(<a name="\w+"></a>)?<img src=".+" width="?36"? height="?36"? alt=".+" title="(.+)" align="?absmiddle"?><font.+\+1"?>.+</font.+<a href="/?(.+)" onmouseover="window.status=\'.+\';return.+>(.+)</a>.+<br>(.+)$%im',
-                    $story,
-                    $result,
-                    PREG_PATTERN_ORDER
-                );
+                // otherwise, try to parse list for pages like:
+                // http://www.snopes.com/military/military.asp
+                if (!$result) {
+                    $result = self::parseOldSummaryPage($story);
+                }
 
-                echo $story;
                 print_r($result);
+            }
+        }
 
-//                echo $story->tagName.":".$story->nodeValue."\n";
+        private static function getClassificationByImg($imgURL)
+        {
+            $imgURL = substr($imgURL, strrpos($imgURL, "/") + 1);
+            switch ($imgURL) {
+                case self::TRUTH_ICON:
+                    return "true";
+                    break;
+                case self::FALSE_ICON:
+                    return "false";
+                    break;
+                case self::MULTI_TRUTH_ICON:
+                    return "multiple truths";
+                    break;
+                case self::MIXED_ICON:
+                    return "mixture";
+                    break;
+                case self::PARTLY_TRUE_ICON:
+                    return "partly true";
+                    break;
+                case self::UNDETERMINED_ICON:
+                    return "undetermined";
+                    break;
+                case self::UNCLASSIFIABLE_ICON:
+                    return "unclassifiable";
+                    break;
+                case self::LEGEND_ICON:
+                    return "legend";
+                    break;
             }
 
-//            die();
+            return null;
         }
 
         private static function getPageType($pageHTML)
@@ -165,5 +194,69 @@
             }
 
             return self::CATEGORY_PAGE;
+        }
+
+        private static function parseNewSummaryPage($story)
+        {
+            preg_match_all(
+                '%(<a name="\w+"></a>)?<img src="(.+)" width="?36"? height="?36"? alt=".+" title=".+" align="?absmiddle"?><font.+\+1"?>.+</font.+<a href="/?(.+)" onmouseover="window.status=\'.+\';return.+>(.+)</a>.+<br>(.+)$%im',
+                $story,
+                $result,
+                PREG_PATTERN_ORDER
+            );
+
+            if (count($result) == 0 || count($result[0]) == 0) {
+                return null;
+            }
+
+            $objs    = array();
+            $counter = 0;
+            for ($i = 0; $i < count($result[0]); $i++) {
+                $rating  = self::getClassificationByImg($result[2][$counter]);
+                $url     = $result[3][$counter];
+                $summary = $result[5][$counter];
+
+                $objs[] = array(
+                    "rating"  => $rating,
+                    "summary" => $summary,
+                    "url"     => $url
+                );
+
+                $counter++;
+            }
+
+            return $objs;
+        }
+
+        private static function parseOldSummaryPage($story)
+        {
+            preg_match_all(
+                '%(<a name="\w+"></a>)?<img.+?src="(.+)".+?align="ABSMIDDLE">(.+)%im',
+                $story,
+                $result,
+                PREG_PATTERN_ORDER
+            );
+
+            $objs    = array();
+            $counter = 0;
+            for ($i = 0; $i < count($result[0]); $i++) {
+
+                $summary = preg_replace('%(.+)?<a href="([^"]+).+>(.+)</a>(.+)?%im', '$1$3$4', $result[3][$counter]);
+                $summary = preg_replace('%<font.+</font>%im', '', $summary);
+                $summary = preg_replace('%(</?[^<]+>)%im', '', $summary);
+                $summary = trim($summary);
+
+                $url = preg_replace('%(.+)?<a href="([^"]+).+>(.+)</a>(.+)?%im', '$2', $result[3][$counter]);
+
+                $objs[] = array(
+                    "rating"  => self::getClassificationByImg($result[2][$counter]),
+                    "summary" => $summary,
+                    "url"     => $url
+                );
+
+                $counter++;
+            }
+
+            return $objs;
         }
     }
