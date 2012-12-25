@@ -41,7 +41,7 @@
             foreach ($category as $categoryDOM) {
                 $title = $categoryDOM->getAttribute("onmouseover");
                 preg_match_all("/^.+\'(.+)\'/", $title, $result, PREG_PATTERN_ORDER);
-                $title = trim($result[1][0]);
+                $title = self::clean($result[1][0]);
                 $url   = $categoryDOM->getAttribute("href");
 
                 if (isset($categories[$title])) {
@@ -52,6 +52,10 @@
                     "url"           => $url,
                     "subcategories" => self::getSubcategories($url)
                 );
+
+                echo $title . "\n";
+                print_r($categories[$title]);
+                echo "\n\n\n";
             }
 
             return $categories;
@@ -68,21 +72,26 @@
             }
 
             $crawler = new Crawler($categoryHTML);
-            echo "http://www.snopes.com$baseURL\n";
 
+            $parentURL = substr($baseURL, 0, strrpos($baseURL, "/"));
             $baseXPath = "/_root/html/body/div[1]/table[3]/tr/td/table/tr/td[2]/table//a";
 
             $subcategory   = $crawler->filterXPath("$baseXPath");
             $subcategories = array();
 
             foreach ($subcategory as $subcategoryDOM) {
-                $description                                     = trim($subcategoryDOM->parentNode->textContent);
-                $description                                     = trim(
+                $description = self::clean($subcategoryDOM->parentNode->textContent);
+                $description = self::clean(
                     substr($description, strpos($description, "\r\n"))
                 );
-                $subcategories[trim($subcategoryDOM->nodeValue)] = array(
-                    "url"         => $subcategoryDOM->getAttribute("href"),
-                    "description" => $description
+
+                $url                                                    = $parentURL . "/" . $subcategoryDOM->getAttribute(
+                    "href"
+                );
+                $subcategories[self::clean($subcategoryDOM->nodeValue)] = array(
+                    "url"         => $url,
+                    "description" => $description,
+                    "summaries"   => self::getStorySummaries($url)
                 );
             }
 
@@ -95,13 +104,18 @@
 
                 foreach ($subcategory as $subcategoryDOM) {
 
-                    $description                                     = trim($subcategoryDOM->parentNode->textContent);
-                    $description                                     = trim(
+                    $description = self::clean($subcategoryDOM->parentNode->textContent);
+                    $description = self::clean(
                         substr($description, strpos($description, "\r\n"))
                     );
-                    $subcategories[trim($subcategoryDOM->nodeValue)] = array(
-                        "url"         => $subcategoryDOM->getAttribute("href"),
-                        "description" => $description
+
+                    $url                                                    = $parentURL . "/" . $subcategoryDOM->getAttribute(
+                        "href"
+                    );
+                    $subcategories[self::clean($subcategoryDOM->nodeValue)] = array(
+                        "url"         => $url,
+                        "description" => $description,
+                        "summaries"   => self::getStorySummaries($url)
                     );
                 }
             }
@@ -113,9 +127,15 @@
          * Get a list of stories related to a category
          *
          * @param        $baseURL
+         *
+         * @return array
          */
         public static function getStorySummaries($baseURL)
         {
+            if (substr($baseURL, 0, 1) != "/") {
+                $baseURL = "/" . $baseURL;
+            }
+
             $categoryHTML = file_get_contents("http://www.snopes.com" . $baseURL);
 
             libxml_use_internal_errors(true);
@@ -131,26 +151,60 @@
             // otherwise, try to get list for pages like:
             // http://www.snopes.com/military/military.asp
             if ($s->length == 0) {
-                $s = $q->query('//*[@id="main-content"]/table/tr/td[2]/center/font[2]/div/table[2]/tr/td');
+                $s = self::findBestMatch(
+                    $dom,
+                    $q,
+                    array(
+                         '//*[@id="main-content"]/table/tr/td[2]/center/font[2]/div/table[2]/tr/td',
+                         '//*[@id="main-content"]/table/tr/td[2]/center/font[2]/div/table[3]/tr/td',
+                         '//*[@id="main-content"]/table/tr/td[2]/center/font[2]/div/font[2]/table/tr/td',
+                         '//*[@id="main-content"]/table/tr/td[2]/center/font[2]/div/table/tr/td',
+                         '//*[@id="main-content"]/table/tr/td[2]/center/font[2]/div/table//*/td'
+                    ), $baseURL
+                );
             }
 
-            foreach ($s as $story) {
-                $story = $dom->saveHTML($story);
-                $story = str_replace("<br><br>", "\n\n-----------------\n\n", $story);
-                $story = str_replace("\r\n", "", $story);
+            if(!$s)
+                return array();
 
-                // try to parse list for pages like:
-                // http://www.snopes.com/cokelore/cokelore.asp
-                $result = self::parseNewSummaryPage($story);
+            $story = $s->item(0);
+            $story = $dom->saveHTML($story);
+            $story = str_replace("<br><br>", "\n\n-----------------\n\n", $story);
+            $story = str_replace("\r\n", "", $story);
 
-                // otherwise, try to parse list for pages like:
-                // http://www.snopes.com/military/military.asp
-                if (!$result) {
-                    $result = self::parseOldSummaryPage($story);
+            // try to parse list for pages like:
+            // http://www.snopes.com/cokelore/cokelore.asp
+            $result = self::parseNewSummaryPage($story);
+
+            // otherwise, try to parse list for pages like:
+            // http://www.snopes.com/military/military.asp
+            if (!$result) {
+                $result = self::parseOldSummaryPage($story);
+            }
+
+
+            return $result;
+        }
+
+        private static function findBestMatch(DOMDocument $dom, DOMXPath $q, array $xpaths, $url)
+        {
+            $bestMatch   = null;
+            $matchLength = 0;
+
+            foreach ($xpaths as $xpath) {
+                $match = $q->query($xpath);
+                if (!$match || $match->length <= 0) {
+                    continue;
                 }
 
-                print_r($result);
+                $raw = $dom->saveHTML($match->item(0));
+                if (strlen($raw) > $matchLength) {
+                    $bestMatch   = $match;
+                    $matchLength = strlen($raw);
+                }
             }
+
+            return $bestMatch;
         }
 
         private static function getClassificationByImg($imgURL)
@@ -212,13 +266,18 @@
             $objs    = array();
             $counter = 0;
             for ($i = 0; $i < count($result[0]); $i++) {
-                $rating  = self::getClassificationByImg($result[2][$counter]);
-                $url     = $result[3][$counter];
+                $rating = self::getClassificationByImg($result[2][$counter]);
+                $url    = self::clean($result[3][$counter]);
+                $title  = ucfirst(self::clean($result[4][$counter]));
+
                 $summary = $result[5][$counter];
+                $summary = preg_replace('%<font.+</font>%im', '', $summary);
+                $summary = ucfirst(self::clean(preg_replace('%(</?[^<]+>)%im', '', $summary)));
 
                 $objs[] = array(
                     "rating"  => $rating,
                     "summary" => $summary,
+                    "title"   => $title,
                     "url"     => $url
                 );
 
@@ -241,16 +300,35 @@
             $counter = 0;
             for ($i = 0; $i < count($result[0]); $i++) {
 
-                $summary = preg_replace('%(.+)?<a href="([^"]+).+>(.+)</a>(.+)?%im', '$1$3$4', $result[3][$counter]);
+                $title = ucfirst(
+                    self::clean(
+                        preg_replace(
+                            '%(.+)?<a href="([^"]+)"(?:.+status=\'([^\']+).+)?>(.+)</a>(.+)?%im',
+                            '$3',
+                            $result[3][$counter]
+                        )
+                    )
+                );
+
+                $summary = self::clean(
+                    preg_replace(
+                        '%(.+)?<a href="([^"]+)"(?:.+status=\'([^\']+).+)?>(.+)</a>(.+)?%im',
+                        '$1$4$5',
+                        $result[3][$counter]
+                    )
+                );
                 $summary = preg_replace('%<font.+</font>%im', '', $summary);
                 $summary = preg_replace('%(</?[^<]+>)%im', '', $summary);
-                $summary = trim($summary);
+                $summary = ucfirst(self::clean($summary));
 
-                $url = preg_replace('%(.+)?<a href="([^"]+).+>(.+)</a>(.+)?%im', '$2', $result[3][$counter]);
+                $url = self::clean(
+                    preg_replace('%(.+)?<a href="([^"]+).+>(.+)</a>(.+)?%im', '$2', $result[3][$counter])
+                );
 
                 $objs[] = array(
                     "rating"  => self::getClassificationByImg($result[2][$counter]),
                     "summary" => $summary,
+                    "title"   => $title,
                     "url"     => $url
                 );
 
@@ -258,5 +336,15 @@
             }
 
             return $objs;
+        }
+
+        private static function clean($str)
+        {
+            // trim whitespace
+            $str = trim($str);
+            // remove tags
+            $str = preg_replace('%(</?[^<]+>)%im', '', $str);
+
+            return $str;
         }
     }
