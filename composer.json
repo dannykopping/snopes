@@ -1,6 +1,7 @@
 {
     "require": {
         "guzzle/guzzle": "3.0.*",
-        "querypath/QueryPath": "2.1.2"
+        "querypath/QueryPath": "2.1.2",
+        "thesmart/php-url": ">=v0.1"
     }
 }

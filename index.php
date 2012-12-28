@@ -5,7 +5,7 @@
 
     require_once "vendor/autoload.php";
     require_once "scrape/SnopesScraper.php";
-    require 'vendor/querypath/QueryPath/src/QueryPath/QueryPath.php';
+    require_once 'vendor/querypath/QueryPath/src/QueryPath/QueryPath.php';
 
     $c = SnopesScraper::getCategories();
     foreach($c as $category)

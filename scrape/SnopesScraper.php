@@ -1,4 +1,6 @@
 <?php
+use url\Url;
+
 /**
  *  This class scrapes the Snopes site for various resources
  */
@@ -19,6 +21,8 @@ class SnopesScraper
     const UNCLASSIFIABLE_ICON = "white.gif";
     const LEGEND_ICON = "legend.gif";
 
+    const SNOPES_URL = "http://www.snopes.com/";
+
     /**
      * Get an array of all the categories on Snopes
      *
@@ -26,7 +30,7 @@ class SnopesScraper
      */
     public static function getCategories()
     {
-        $homepageHTML = file_get_contents("http://www.snopes.com/snopes.asp");
+        $homepageHTML = file_get_contents(self::SNOPES_URL . "/snopes.asp");
 //        echo "Loading " . "http://www.snopes.com/snopes.asp\n";
 
         // Typical category nodes on this page are identified as follows:
@@ -55,10 +59,11 @@ class SnopesScraper
                 "src"
             );
 
+            $url = self::getURL($url, self::SNOPES_URL);
             $categories[$title] = array(
                 "title" => $title,
                 "url" => $url,
-                "icon" => $icon,
+                "icon" => self::getURL($icon, self::SNOPES_URL),
                 "subcategories" => self::getSubcategories($url)
             );
 
@@ -78,11 +83,29 @@ class SnopesScraper
      */
     private static function getSubcategories($baseURL)
     {
-        $categoryHTML = file_get_contents("http://www.snopes.com/" . $baseURL);
-        // echo "Loading " . "http://www.snopes.com/" . $baseURL . "\n";
+        $categoryHTML = file_get_contents($baseURL);
+        echo "Loading " . $baseURL . "\n";
         if (empty($categoryHTML)) {
             return array();
         }
+
+        // check to see if the loaded page is merely a redirection page
+        preg_match_all(
+            '%^<META HTTP-EQUIV="Refresh" CONTENT="0; URL=(.+)"/?>$%',
+            trim($categoryHTML),
+            $result,
+            PREG_PATTERN_ORDER
+        );
+        if (isset($result[0]) && !empty($result[0])) {
+            $line = $result[0][0];
+            if (trim($categoryHTML) == trim($line)) {
+                $url = $result[1][0];
+                $url = self::getURL($url, self::SNOPES_URL);
+
+                return self::getSubcategories($url);
+            }
+        }
+
 
         $subcategories = array();
 
@@ -98,9 +121,7 @@ class SnopesScraper
 
                 // get the current element's previous sibling, which should contain an icon
                 $icon = htmlqp($categoryHTML, "td[height='80']")->eq($x)->prev()->find("img")->attr("src");
-
                 $url = htmlqp($categoryHTML, "td[height='80']")->eq($x)->find("a")->attr("href");
-                $url = $parentURL . "/" . $url;
 
                 $description = htmlqp($categoryHTML, "td[height='80']")->eq($x)->find("font")->childrenText($separator);
             } catch (Exception $e) {
@@ -115,10 +136,11 @@ class SnopesScraper
                 $description = self::clean(implode(" ", $description));
             }
 
+            $url = self::getURL($url, $parentURL);
             $subcategories[$title] = array(
                 "title" => $title,
                 "url" => $url,
-                "icon" => $icon,
+                "icon" => self::getURL($icon, $parentURL),
                 "description" => $description,
                 "stories" => self::getStorySummaries($url)
             );
@@ -136,11 +158,7 @@ class SnopesScraper
      */
     public static function getStorySummaries($baseURL)
     {
-        if (substr($baseURL, 0, 1) != "/") {
-            $baseURL = "/" . $baseURL;
-        }
-
-        $categoryHTML = @file_get_contents("http://www.snopes.com" . $baseURL);
+        $categoryHTML = file_get_contents($baseURL);
         // echo "\tLoading " . "http://www.snopes.com/" . $baseURL . "\n";
         if (empty($categoryHTML)) {
             return array();
@@ -151,6 +169,7 @@ class SnopesScraper
         $dom->loadHTML($categoryHTML);
 
         $q = new DOMXPath($dom);
+        $parentURL = substr($baseURL, 0, strrpos($baseURL, "/"));
 
         $storiesHTML = htmlqp($categoryHTML, "table[width='90%'][align='CENTER']")->children("td")->last()->html();
         $storiesHTML = str_replace("&#13;", "", $storiesHTML);
@@ -159,21 +178,22 @@ class SnopesScraper
         $storiesHTML = str_replace("<br /><br />", "<br/><br/>", $storiesHTML);
         $storiesHTML = str_replace("<br/><br/>", "\n\n-----------------\n\n", $storiesHTML);
 
-        return self::parseStoriesPage($storiesHTML);
+        return self::parseStoriesPage($storiesHTML, $parentURL);
     }
 
     /**
      * Parse stories summary page
      *
      * @param $storiesHTML
+     * @param $baseURL
      * @return array|null
      */
-    private static function parseStoriesPage($storiesHTML)
+    private static function parseStoriesPage($storiesHTML, $baseURL)
     {
         // try parsing "newer" page format, otherwise fall back to "older" page parsing
-        $parsed = self::parseNewSummaryPage($storiesHTML);
+        $parsed = self::parseNewSummaryPage($storiesHTML, $baseURL);
         if (!$parsed) {
-            return self::parseOldSummaryPage($storiesHTML);
+            return self::parseOldSummaryPage($storiesHTML, $baseURL);
         }
 
         return $parsed;
@@ -184,9 +204,10 @@ class SnopesScraper
      * http://www.snopes.com/cokelore/cokelore.asp
      *
      * @param $storiesHTML
+     * @param $baseURL
      * @return array|null
      */
-    private static function parseNewSummaryPage($storiesHTML)
+    private static function parseNewSummaryPage($storiesHTML, $baseURL)
     {
         preg_match_all(
             '%(<a name="\w+"></a>)?<img src="(.+)" width="?36"? height="?36"? alt=".+" title=".+" align="?absmiddle"? /><font.+\+1"?>.+</font.+<a href="/?(.+)" onmouseover="window.status=\'.+\';return.+>(.+)</a>.+<br />(.+)$%im',
@@ -214,7 +235,7 @@ class SnopesScraper
                 "rating" => $rating,
                 "summary" => $summary,
                 "title" => $title,
-                "url" => $url
+                "url" => self::getURL($url, $baseURL)
             );
 
             $counter++;
@@ -228,9 +249,10 @@ class SnopesScraper
      * http://www.snopes.com/military/military.asp
      *
      * @param $storiesHTML
+     * @param $baseURL
      * @return array
      */
-    private static function parseOldSummaryPage($storiesHTML)
+    private static function parseOldSummaryPage($storiesHTML, $baseURL)
     {
         preg_match_all(
             '%(<a name="\w+"></a>)?<img.+?src="(.+)".+?align="ABSMIDDLE"/>(.+)%im',
@@ -274,7 +296,7 @@ class SnopesScraper
                 "rating" => self::getClassificationByImg($result[2][$counter]),
                 "summary" => $summary,
                 "title" => $title,
-                "url" => $url
+                "url" => self::getURL($url, $baseURL)
             );
 
             $counter++;
@@ -326,5 +348,12 @@ class SnopesScraper
         $str = preg_replace('%(</?[^<]+>)%im', '', $str);
 
         return $str;
+    }
+
+    private static function getURL($path, $base)
+    {
+        $u = new Url($base);
+        $u->setPath($u->getPath() . "/" . $path);
+        return (string) $u;
     }
 }
