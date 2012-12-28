@@ -31,25 +31,33 @@ class SnopesScraper
         $homepageHTML = file_get_contents("http://www.snopes.com/snopes.asp");
         echo "Loading " . "http://www.snopes.com/snopes.asp\n";
 
-        $crawler = new Crawler($homepageHTML);
-        $baseXPath = "/_root/html/body/div[1]/table[4]/tr/td/table/tr/td[2]/table[2]//a";
+        // Typical category nodes on this page are identified as follows:
+        /*
+         * <td align="LEFT" valign="CENTER"><a href="autos/autos.asp" onmouseover="window.status='Automobiles';return true" onmouseout="window.status='';return true">
+         * <img src="graphics/icons/main/autos.gif" border="0" valign="ABSMIDDLE"></a></td>
+         *
+         * <td align="LEFT" valign="CENTER"><a href="autos/autos.asp" onmouseover="window.status='Automobiles';return true" onmouseout="window.status='';return true">
+         * <font face="Verdana"><b>Autos</b></font></a></td>
+        */
 
-        $category = $crawler->filterXPath("$baseXPath");
+        // There are two <td> nodes for each category - one for the image, one for the text - we need to select
+        // the <td> elements without constituent <img> tags for the text data
+
+        $catCount = htmlqp($homepageHTML, "td[align='LEFT'][valign='CENTER']:not(img)")->count();
         $categories = array();
 
-        $counter = 0;
-        foreach ($category as $categoryDOM) {
-            $title = $categoryDOM->getAttribute("onmouseover");
-            preg_match_all("/^.+\'(.+)\'/", $title, $result, PREG_PATTERN_ORDER);
-            $title = self::clean($result[1][0]);
-            $url = $categoryDOM->getAttribute("href");
-
-            if (isset($categories[$title])) {
+        for ($x = 0; $x < $catCount; $x++) {
+            $title = htmlqp($homepageHTML, "td[align='LEFT'][valign='CENTER']:not(img)")->eq($x)->text();
+            if(empty($title))
                 continue;
-            }
+
+            $url = htmlqp($homepageHTML, "td[align='LEFT'][valign='CENTER']:not(img)")->eq($x)->find("a")->attr("href");
+            $icon = htmlqp($homepageHTML, "td[align='LEFT'][valign='CENTER']:not(font)")->eq($x)->find("img")->attr("src");
 
             $categories[$title] = array(
+                "title" => $title,
                 "url" => $url,
+                "icon" => $icon,
                 "subcategories" => self::getSubcategories($url)
             );
         }
@@ -57,6 +65,12 @@ class SnopesScraper
         return $categories;
     }
 
+    /**
+     * Get all the subcategories for a given category (provided by the $baseURL argument)
+     *
+     * @param $baseURL
+     * @return array
+     */
     private static function getSubcategories($baseURL)
     {
         $categoryHTML = file_get_contents("http://www.snopes.com/" . $baseURL);
@@ -67,96 +81,41 @@ class SnopesScraper
 
         $subcategories = array();
 
-        $empty = htmlqp($categoryHTML, "td[height='80']")->length;
         $subcatCount = htmlqp($categoryHTML, "td[height='80']")->find("a")->count();
         $parentURL = substr($baseURL, 0, strrpos($baseURL, "/"));
-
-
+        $separator = '|||';
         for ($x = 0; $x < $subcatCount; $x++) {
-            $title = self::clean(htmlqp($categoryHTML, "td[height='80']")->find("a")->eq($x)->text());
-            $url = htmlqp($categoryHTML, "td[height='80']")->find("a")->eq($x)->attr("href");
-            $url = $parentURL . "/" . $url;
-            $description = htmlqp($categoryHTML, "td[height='80']")->find("font")->eq($x)->childrenText('|||');
+            try {
+                $title = self::clean(htmlqp($categoryHTML, "td[height='80']")->eq($x)->find("a")->text());
+                if(empty($title))
+                    continue;
 
-            $description = self::clean(substr($description, strpos($description, "|||") + 3));
+                // get the current element's previous sibling, which should contain an icon
+                $icon = htmlqp($categoryHTML, "td[height='80']")->eq($x)->prev()->find("img")->attr("src");
+
+                $url = htmlqp($categoryHTML, "td[height='80']")->eq($x)->find("a")->attr("href");
+                $url = $parentURL . "/" . $url;
+
+                $description = htmlqp($categoryHTML, "td[height='80']")->eq($x)->find("font")->childrenText($separator);
+            } catch (Exception $e) {
+                continue;
+            }
+
+            if (strpos($description, $separator) !== false) {
+                $description = explode($separator, $description);
+
+                // always remove first element because it'll be the contents of the <a> tag and we already have that
+                array_shift($description);
+                $description = self::clean(implode(" ", $description));
+            }
 
             $subcategories[$title] = array(
                 "title" => $title,
                 "url" => $url,
+                "icon" => $icon,
                 "description" => $description
             );
         }
-
-//            $categoryHTML = file_get_contents("tmp/crime.html");
-
-//        $pageType = self::getPageType($categoryHTML);
-//
-//        $crawler = new Crawler($categoryHTML);
-//
-//        $parentURL = substr($baseURL, 0, strrpos($baseURL, "/"));
-//        $baseXPath = "/_root/html/body/div[1]/table[3]/tr/td/table/tr/td[2]/table//a";
-//
-//        $subcategory = $crawler->filterXPath("$baseXPath");
-//        $subcategories = array();
-//
-//        foreach ($subcategory as $subcategoryDOM) {
-//            $description = self::clean($subcategoryDOM->parentNode->textContent);
-//            $description = self::clean(
-//                substr($description, strpos($description, "\r\n"))
-//            );
-//
-//            $url = $parentURL . "/" . $subcategoryDOM->getAttribute(
-//                "href"
-//            );
-//            $subcategories[self::clean($subcategoryDOM->nodeValue)] = array(
-//                "url" => $url,
-//                "description" => $description,
-//                "summaries" => self::getStorySummaries($url)
-//            );
-//        }
-//
-//        // try a different xpath for older pages
-//        if (count($subcategories) <= 0) {
-//            $baseXPaths = array(
-//                '//*[@id="main-content"]/table/tr/td[2]/center/font[2]/div/table//a',
-//                '//*[@id="main-content"]/table/tr/td[2]/center/font[2]/div/table[2]//a',
-//                '//*[@id="main-content"]/table/tr/td[2]/center/font[2]/div/table[3]//a',
-//                '/_root/html/body/div[1]/table[3]/tr/td/table/tr/td[2]/div[2]/table//a'
-//            );
-//
-//            foreach ($baseXPaths as $baseXPath) {
-//                $subcategory = $crawler->filterXPath("$baseXPath");
-//                if ($subcategory->count() > 0) {
-//                    break;
-//                }
-//            }
-//
-//            $subcategories = array();
-//            foreach ($subcategory as $subcategoryDOM) {
-//                $title = self::clean($subcategoryDOM->nodeValue);
-//                if (empty($title)) {
-//                    continue;
-//                }
-//
-//                $description = self::clean($subcategoryDOM->parentNode->textContent);
-//                $description = self::clean(
-//                    substr($description, strpos($description, "\r\n"))
-//                );
-//
-//                $url = $parentURL . "/" . $subcategoryDOM->getAttribute(
-//                    "href"
-//                );
-//                $subcategories[$title] = array(
-//                    "url" => $url,
-//                    "description" => $description,
-//                    "summaries" => self::getStorySummaries($url)
-//                );
-//
-//                if (count($subcategories[$title]["summaries"]) <= 0) {
-//                    $i = 0;
-//                }
-//            }
-//        }
 
         return $subcategories;
     }
