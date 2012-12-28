@@ -31,7 +31,6 @@ class SnopesScraper
     public static function getCategories()
     {
         $homepageHTML = file_get_contents(self::SNOPES_URL . "/snopes.asp");
-//        echo "Loading " . "http://www.snopes.com/snopes.asp\n";
 
         // Typical category nodes on this page are identified as follows:
         /*
@@ -90,22 +89,9 @@ class SnopesScraper
         }
 
         // check to see if the loaded page is merely a redirection page
-        preg_match_all(
-            '%^<META HTTP-EQUIV="Refresh" CONTENT="0; URL=(.+)"/?>$%',
-            trim($categoryHTML),
-            $result,
-            PREG_PATTERN_ORDER
-        );
-        if (isset($result[0]) && !empty($result[0])) {
-            $line = $result[0][0];
-            if (trim($categoryHTML) == trim($line)) {
-                $url = $result[1][0];
-                $url = self::getURL($url, self::SNOPES_URL);
-
-                return self::getSubcategories($url);
-            }
-        }
-
+        $result = self::checkMetaRedirection($categoryHTML, $baseURL, __FUNCTION__);
+        if($result !== false)
+            return $result;
 
         $subcategories = array();
 
@@ -158,20 +144,25 @@ class SnopesScraper
      */
     public static function getStorySummaries($baseURL)
     {
-        $categoryHTML = file_get_contents($baseURL);
+        $pageHTML = file_get_contents($baseURL);
         // echo "\tLoading " . "http://www.snopes.com/" . $baseURL . "\n";
-        if (empty($categoryHTML)) {
+        if (empty($pageHTML)) {
             return array();
         }
 
+        // check to see if the loaded page is merely a redirection page
+        $result = self::checkMetaRedirection($pageHTML, $baseURL, __FUNCTION__);
+        if($result !== false)
+            return $result;
+
         libxml_use_internal_errors(true);
         $dom = new DOMDocument();
-        $dom->loadHTML($categoryHTML);
+        $dom->loadHTML($pageHTML);
 
         $q = new DOMXPath($dom);
         $parentURL = substr($baseURL, 0, strrpos($baseURL, "/"));
 
-        $storiesHTML = htmlqp($categoryHTML, "table[width='90%'][align='CENTER']")->children("td")->last()->html();
+        $storiesHTML = htmlqp($pageHTML, "table[width='90%'][align='CENTER']")->children("td")->last()->html();
         $storiesHTML = str_replace("&#13;", "", $storiesHTML);
         $storiesHTML = str_replace("\r\n", "", $storiesHTML);
         $storiesHTML = str_replace("\n", "", $storiesHTML);
@@ -350,10 +341,58 @@ class SnopesScraper
         return $str;
     }
 
-    private static function getURL($path, $base)
+    private static function getURL($path, $base, $removeFilePath = true)
     {
         $u = new Url($base);
-        $u->setPath($u->getPath() . "/" . $path);
+
+        $validPath = $u->getPath();
+        if ($removeFilePath) {
+            $pathSegments = explode("/", $u->getPath());
+            if (count($pathSegments) <= 0) {
+                $validPath = "";
+            } else {
+                $valid = array();
+
+                foreach ($pathSegments as $segment) {
+                    if(strpos($segment, ".asp") === false && strlen(trim($segment)) > 0)
+                        $valid[] = $segment;
+                }
+
+                $validPath = implode("/", $valid);
+            }
+        }
+
+        $u->setPath($validPath . "/" . $path);
         return (string) $u;
+    }
+
+    /**
+     * If the given URL returns a page with a simple <META> redirection tag, grab the destination page
+     * and send the data to the callback function
+     *
+     * @param $html
+     * @param $baseURL
+     * @param $callback
+     * @return mixed
+     */
+    private static function checkMetaRedirection($html, $baseURL, $callback)
+    {
+        preg_match_all(
+            '%^<META HTTP-EQUIV="Refresh" CONTENT="0; URL=(.+)"/?>$%',
+            trim($html),
+            $result,
+            PREG_PATTERN_ORDER
+        );
+        if (isset($result[0]) && !empty($result[0])) {
+            $line = $result[0][0];
+            if (trim($html) == trim($line)) {
+                $url = $result[1][0];
+                $url = self::getURL($url, $baseURL);
+
+                return self::$callback($url);
+            }
+        }
+
+        return false;
     }
 }
