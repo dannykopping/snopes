@@ -27,7 +27,7 @@ class SnopesScraper
     public static function getCategories()
     {
         $homepageHTML = file_get_contents("http://www.snopes.com/snopes.asp");
-        echo "Loading " . "http://www.snopes.com/snopes.asp\n";
+//        echo "Loading " . "http://www.snopes.com/snopes.asp\n";
 
         // Typical category nodes on this page are identified as follows:
         /*
@@ -45,7 +45,7 @@ class SnopesScraper
         $categories = array();
 
         for ($x = 0; $x < $catCount; $x++) {
-            $title = htmlqp($homepageHTML, "td[align='LEFT'][valign='CENTER']:not(img)")->eq($x)->text();
+            $title = self::clean(htmlqp($homepageHTML, "td[align='LEFT'][valign='CENTER']:not(img)")->eq($x)->text());
             if (empty($title)) {
                 continue;
             }
@@ -62,8 +62,9 @@ class SnopesScraper
                 "subcategories" => self::getSubcategories($url)
             );
 
-            if(empty($categories[$title]["subcategories"]))
+            if (empty($categories[$title]["subcategories"])) {
                 $categories[$title]["stories"] = self::getStorySummaries($url);
+            }
         }
 
         return $categories;
@@ -78,7 +79,7 @@ class SnopesScraper
     private static function getSubcategories($baseURL)
     {
         $categoryHTML = file_get_contents("http://www.snopes.com/" . $baseURL);
-        echo "Loading " . "http://www.snopes.com/" . $baseURL . "\n";
+        // echo "Loading " . "http://www.snopes.com/" . $baseURL . "\n";
         if (empty($categoryHTML)) {
             return array();
         }
@@ -140,7 +141,7 @@ class SnopesScraper
         }
 
         $categoryHTML = @file_get_contents("http://www.snopes.com" . $baseURL);
-        echo "\tLoading " . "http://www.snopes.com/" . $baseURL . "\n";
+        // echo "\tLoading " . "http://www.snopes.com/" . $baseURL . "\n";
         if (empty($categoryHTML)) {
             return array();
         }
@@ -171,8 +172,9 @@ class SnopesScraper
     {
         // try parsing "newer" page format, otherwise fall back to "older" page parsing
         $parsed = self::parseNewSummaryPage($storiesHTML);
-        if(!$parsed)
+        if (!$parsed) {
             return self::parseOldSummaryPage($storiesHTML);
+        }
 
         return $parsed;
     }
@@ -201,7 +203,7 @@ class SnopesScraper
         $counter = 0;
         for ($i = 0; $i < count($result[0]); $i++) {
             $rating = self::getClassificationByImg($result[2][$counter]);
-            $url = self::clean($result[3][$counter]);
+            $url = trim($result[3][$counter]);
             $title = ucfirst(self::clean($result[4][$counter]));
 
             $summary = $result[5][$counter];
@@ -262,9 +264,7 @@ class SnopesScraper
             $summary = preg_replace('%(</?[^<]+>)%im', '', $summary);
             $summary = ucfirst(self::clean($summary));
 
-            $url = self::clean(
-                preg_replace('%(.+)?<a href="([^"]+).+>(.+)</a>(.+)?%im', '$2', $result[3][$counter])
-            );
+            $url = trim(preg_replace('%(.+)?<a href="([^"]+).+>(.+)</a>(.+)?%im', '$2', $result[3][$counter]));
 
             if ($summary == '= unclassifiable veracity' || $title == '= unclassifiable veracity' || $url == '= unclassifiable veracity') {
                 continue;
@@ -318,8 +318,10 @@ class SnopesScraper
 
     private static function clean($str)
     {
-        // trim whitespace
-        $str = trim($str);
+        // trim excessive whitespace (internal and external)
+        // notice that 2 or more "blank" unicode chars and spaces is shortened to a single space
+        // - there is a slight different between "blank" chars and spaces for some reason in PCRE regex
+        $str = trim(preg_replace('/([  \s]{2,})+/', ' ', $str));
         // remove tags
         $str = preg_replace('%(</?[^<]+>)%im', '', $str);
 
