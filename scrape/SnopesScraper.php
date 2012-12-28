@@ -65,76 +65,98 @@ class SnopesScraper
             return array();
         }
 
-//            $categoryHTML = file_get_contents("tmp/crime.html");
-
-        $pageType = self::getPageType($categoryHTML);
-
-        $crawler = new Crawler($categoryHTML);
-
-        $parentURL = substr($baseURL, 0, strrpos($baseURL, "/"));
-        $baseXPath = "/_root/html/body/div[1]/table[3]/tr/td/table/tr/td[2]/table//a";
-
-        $subcategory = $crawler->filterXPath("$baseXPath");
         $subcategories = array();
 
-        foreach ($subcategory as $subcategoryDOM) {
-            $description = self::clean($subcategoryDOM->parentNode->textContent);
-            $description = self::clean(
-                substr($description, strpos($description, "\r\n"))
-            );
+        $empty = htmlqp($categoryHTML, "td[height='80']")->length;
+        $subcatCount = htmlqp($categoryHTML, "td[height='80']")->find("a")->count();
+        $parentURL = substr($baseURL, 0, strrpos($baseURL, "/"));
 
-            $url = $parentURL . "/" . $subcategoryDOM->getAttribute(
-                "href"
-            );
-            $subcategories[self::clean($subcategoryDOM->nodeValue)] = array(
+
+        for ($x = 0; $x < $subcatCount; $x++) {
+            $title = self::clean(htmlqp($categoryHTML, "td[height='80']")->find("a")->eq($x)->text());
+            $url = htmlqp($categoryHTML, "td[height='80']")->find("a")->eq($x)->attr("href");
+            $url = $parentURL . "/" . $url;
+            $description = htmlqp($categoryHTML, "td[height='80']")->find("font")->eq($x)->childrenText('|||');
+
+            $description = self::clean(substr($description, strpos($description, "|||") + 3));
+
+            $subcategories[$title] = array(
+                "title" => $title,
                 "url" => $url,
-                "description" => $description,
-                "summaries" => self::getStorySummaries($url)
+                "description" => $description
             );
         }
 
-        // try a different xpath for older pages
-        if (count($subcategories) <= 0) {
-            $baseXPaths = array(
-                '//*[@id="main-content"]/table/tr/td[2]/center/font[2]/div/table//a',
-                '//*[@id="main-content"]/table/tr/td[2]/center/font[2]/div/table[2]//a',
-                '//*[@id="main-content"]/table/tr/td[2]/center/font[2]/div/table[3]//a',
-                '/_root/html/body/div[1]/table[3]/tr/td/table/tr/td[2]/div[2]/table//a'
-            );
+//            $categoryHTML = file_get_contents("tmp/crime.html");
 
-            foreach ($baseXPaths as $baseXPath) {
-                $subcategory = $crawler->filterXPath("$baseXPath");
-                if ($subcategory->count() > 0) {
-                    break;
-                }
-            }
-
-            $subcategories = array();
-            foreach ($subcategory as $subcategoryDOM) {
-                $title = self::clean($subcategoryDOM->nodeValue);
-                if (empty($title)) {
-                    continue;
-                }
-
-                $description = self::clean($subcategoryDOM->parentNode->textContent);
-                $description = self::clean(
-                    substr($description, strpos($description, "\r\n"))
-                );
-
-                $url = $parentURL . "/" . $subcategoryDOM->getAttribute(
-                    "href"
-                );
-                $subcategories[$title] = array(
-                    "url" => $url,
-                    "description" => $description,
-                    "summaries" => self::getStorySummaries($url)
-                );
-
-                if (count($subcategories[$title]["summaries"]) <= 0) {
-                    $i = 0;
-                }
-            }
-        }
+//        $pageType = self::getPageType($categoryHTML);
+//
+//        $crawler = new Crawler($categoryHTML);
+//
+//        $parentURL = substr($baseURL, 0, strrpos($baseURL, "/"));
+//        $baseXPath = "/_root/html/body/div[1]/table[3]/tr/td/table/tr/td[2]/table//a";
+//
+//        $subcategory = $crawler->filterXPath("$baseXPath");
+//        $subcategories = array();
+//
+//        foreach ($subcategory as $subcategoryDOM) {
+//            $description = self::clean($subcategoryDOM->parentNode->textContent);
+//            $description = self::clean(
+//                substr($description, strpos($description, "\r\n"))
+//            );
+//
+//            $url = $parentURL . "/" . $subcategoryDOM->getAttribute(
+//                "href"
+//            );
+//            $subcategories[self::clean($subcategoryDOM->nodeValue)] = array(
+//                "url" => $url,
+//                "description" => $description,
+//                "summaries" => self::getStorySummaries($url)
+//            );
+//        }
+//
+//        // try a different xpath for older pages
+//        if (count($subcategories) <= 0) {
+//            $baseXPaths = array(
+//                '//*[@id="main-content"]/table/tr/td[2]/center/font[2]/div/table//a',
+//                '//*[@id="main-content"]/table/tr/td[2]/center/font[2]/div/table[2]//a',
+//                '//*[@id="main-content"]/table/tr/td[2]/center/font[2]/div/table[3]//a',
+//                '/_root/html/body/div[1]/table[3]/tr/td/table/tr/td[2]/div[2]/table//a'
+//            );
+//
+//            foreach ($baseXPaths as $baseXPath) {
+//                $subcategory = $crawler->filterXPath("$baseXPath");
+//                if ($subcategory->count() > 0) {
+//                    break;
+//                }
+//            }
+//
+//            $subcategories = array();
+//            foreach ($subcategory as $subcategoryDOM) {
+//                $title = self::clean($subcategoryDOM->nodeValue);
+//                if (empty($title)) {
+//                    continue;
+//                }
+//
+//                $description = self::clean($subcategoryDOM->parentNode->textContent);
+//                $description = self::clean(
+//                    substr($description, strpos($description, "\r\n"))
+//                );
+//
+//                $url = $parentURL . "/" . $subcategoryDOM->getAttribute(
+//                    "href"
+//                );
+//                $subcategories[$title] = array(
+//                    "url" => $url,
+//                    "description" => $description,
+//                    "summaries" => self::getStorySummaries($url)
+//                );
+//
+//                if (count($subcategories[$title]["summaries"]) <= 0) {
+//                    $i = 0;
+//                }
+//            }
+//        }
 
         return $subcategories;
     }
@@ -234,8 +256,9 @@ class SnopesScraper
         if (!$bestMatch) {
 //            $domH = $dom->saveHTML();
 
-            if($longestMatch)
+            if ($longestMatch) {
                 $bestMatch = $longestMatch;
+            }
         }
 
         return $bestMatch;
